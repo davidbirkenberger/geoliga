@@ -71,6 +71,7 @@ def get_weekly_standings(week=None):
         now = datetime.now(TZ)
         week = now.strftime("%Y-W%U")
     
+    # First try to get from weekly_standings (closed challenges)
     query = """
         SELECT 
             ws.rank,
@@ -86,13 +87,37 @@ def get_weekly_standings(week=None):
         ORDER BY ws.rank
     """
     df = pd.read_sql_query(query, conn, params=(week,))
+    
+    # If no closed standings, get pending results from player_results
+    if df.empty:
+        query_pending = """
+            SELECT 
+                pr.rank,
+                pr.player_name,
+                pr.score,
+                0 as points_awarded,
+                pr.distance_km,
+                pr.time_seconds
+            FROM player_results pr
+            WHERE pr.week = ?
+            ORDER BY pr.rank
+        """
+        df = pd.read_sql_query(query_pending, conn, params=(week,))
+    
     conn.close()
     return df
 
 def get_available_weeks():
     """Get list of available weeks."""
     conn = get_db_connection()
-    query = "SELECT DISTINCT week FROM weekly_standings ORDER BY week DESC"
+    
+    # Get weeks from both closed standings and pending results
+    query = """
+        SELECT DISTINCT week FROM weekly_standings
+        UNION
+        SELECT DISTINCT week FROM player_results
+        ORDER BY week DESC
+    """
     weeks = pd.read_sql_query(query, conn)['week'].tolist()
     conn.close()
     return weeks
@@ -227,6 +252,15 @@ def show_weekly_results():
         st.warning(f"No data for week {selected_week}")
         return
     
+    # Check if this is pending results (no league points awarded yet)
+    is_pending = df['points_awarded'].sum() == 0
+    
+    # Display status
+    if is_pending:
+        st.info("🔄 **Live Results** - Challenge is still active. League points will be awarded when the week closes.")
+    else:
+        st.success("✅ **Final Results** - Week has been closed and league points awarded.")
+    
     # Display results
     df_display = df.copy()
     df_display['time_formatted'] = df_display['time_seconds'].apply(format_time)
@@ -258,6 +292,10 @@ def show_weekly_results():
         st.metric("Highest Score", f"{df['score'].max():,}")
     with col3:
         st.metric("Best Time", format_time(df['time_seconds'].min()))
+    
+    # Show additional info for pending results
+    if is_pending:
+        st.info("💡 **Tip**: Use `python weekly_league.py process CHALLENGE_ID` to update results during the week!")
 
 def show_player_stats():
     """Display detailed player statistics."""
