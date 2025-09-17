@@ -22,14 +22,8 @@ except ImportError:
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
-# Use main database locally, demo database for deployment
-import os
-if os.path.exists("geoliga.db"):
-    DB_PATH = "geoliga.db"  # Use main database locally
-elif os.path.exists("geoliga_demo.db"):
-    DB_PATH = "geoliga_demo.db"  # Fallback to demo for deployment
-else:
-    DB_PATH = "geoliga.db"
+# Always use main database for local development
+DB_PATH = "geoliga.db"
 
 # Page config
 st.set_page_config(
@@ -46,6 +40,14 @@ def get_db_connection():
 def get_league_standings():
     """Get overall league standings."""
     conn = get_db_connection()
+    
+    # Check if tables exist
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='league_standings'")
+    if not cursor.fetchone():
+        conn.close()
+        return pd.DataFrame()
+    
     query = """
         SELECT 
             ls.total_points,
@@ -71,25 +73,36 @@ def get_weekly_standings(week=None):
         now = datetime.now(TZ)
         week = now.strftime("%Y-W%U")
     
+    # Check which tables exist
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = [row[0] for row in cursor.fetchall()]
+    
+    df = pd.DataFrame()
+    
     # First try to get from weekly_standings (closed challenges)
-    query = """
-        SELECT 
-            ws.rank,
-            p.player_name,
-            ws.score,
-            ws.points_awarded,
-            pr.distance_km,
-            pr.time_seconds
-        FROM weekly_standings ws
-        JOIN players p ON ws.player_id = p.player_id
-        JOIN player_results pr ON ws.player_id = pr.player_id AND ws.week = pr.week
-        WHERE ws.week = ? AND ws.participation = 1
-        ORDER BY ws.rank
-    """
-    df = pd.read_sql_query(query, conn, params=(week,))
+    if 'weekly_standings' in tables and 'players' in tables and 'player_results' in tables:
+        query = """
+            SELECT 
+                ws.rank,
+                p.player_name,
+                ws.score,
+                ws.points_awarded,
+                pr.distance_km,
+                pr.time_seconds
+            FROM weekly_standings ws
+            JOIN players p ON ws.player_id = p.player_id
+            JOIN player_results pr ON ws.player_id = pr.player_id AND ws.week = pr.week
+            WHERE ws.week = ? AND ws.participation = 1
+            ORDER BY ws.rank
+        """
+        try:
+            df = pd.read_sql_query(query, conn, params=(week,))
+        except:
+            df = pd.DataFrame()
     
     # If no closed standings, get pending results from player_results
-    if df.empty:
+    if df.empty and 'player_results' in tables:
         query_pending = """
             SELECT 
                 pr.rank,
@@ -102,7 +115,10 @@ def get_weekly_standings(week=None):
             WHERE pr.week = ?
             ORDER BY pr.rank
         """
-        df = pd.read_sql_query(query_pending, conn, params=(week,))
+        try:
+            df = pd.read_sql_query(query_pending, conn, params=(week,))
+        except:
+            df = pd.DataFrame()
     
     conn.close()
     return df
@@ -111,14 +127,31 @@ def get_available_weeks():
     """Get list of available weeks."""
     conn = get_db_connection()
     
-    # Get weeks from both closed standings and pending results
-    query = """
-        SELECT DISTINCT week FROM weekly_standings
-        UNION
-        SELECT DISTINCT week FROM player_results
-        ORDER BY week DESC
-    """
-    weeks = pd.read_sql_query(query, conn)['week'].tolist()
+    # Check which tables exist
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = [row[0] for row in cursor.fetchall()]
+    
+    weeks = []
+    
+    # Get weeks from weekly_standings if it exists
+    if 'weekly_standings' in tables:
+        query = "SELECT DISTINCT week FROM weekly_standings"
+        try:
+            weeks.extend(pd.read_sql_query(query, conn)['week'].tolist())
+        except:
+            pass
+    
+    # Get weeks from player_results if it exists
+    if 'player_results' in tables:
+        query = "SELECT DISTINCT week FROM player_results"
+        try:
+            weeks.extend(pd.read_sql_query(query, conn)['week'].tolist())
+        except:
+            pass
+    
+    # Remove duplicates and sort
+    weeks = sorted(list(set(weeks)), reverse=True)
     conn.close()
     return weeks
 
@@ -157,11 +190,6 @@ def format_time(seconds):
 def main():
     # Header
     st.title("🌍 GeoGuessr League Dashboard")
-    
-    # Show demo notice if using demo database
-    if DB_PATH == "geoliga_demo.db":
-        st.info("📊 **Demo Mode**: This dashboard is showing sample data. For real data, upload your own database.")
-    
     st.markdown("---")
     
     # Sidebar
