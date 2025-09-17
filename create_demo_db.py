@@ -120,18 +120,29 @@ def create_demo_database():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', ("demo_challenge", "2025-W37", "2025-09-15", "2025-09-21", "A Community World", 5, 0, "closed"))
     
-    # Insert demo results
+    # Insert demo results for current week (pending)
+    current_week = datetime.now(TZ).strftime("%Y-W%U")
     demo_results = [
-        ("demo_challenge", "2025-W37", "player1", "Geosky", 15335, 15905.3, 1077, 1),
-        ("demo_challenge", "2025-W37", "player2", "Chinker", 13464, 7731.9, 82479, 2),
-        ("demo_challenge", "2025-W37", "player3", "Gat15", 11739, 8568.4, 258, 3),
-        ("demo_challenge", "2025-W37", "player4", "TheFlane34", 9888, 10440.7, 115, 4),
-        ("demo_challenge", "2025-W37", "player5", "m1r", 9604, 16345.3, 318, 5),
-        ("demo_challenge", "2025-W37", "player6", "pxeliasxt", 9182, 38519.5, 479, 6),
-        ("demo_challenge", "2025-W37", "player7", "EnchantingSummit973", 6957, 29998.9, 160, 7),
-        ("demo_challenge", "2025-W37", "player8", "InfiniteDune090", 6909, 34660.5, 230, 8),
-        ("demo_challenge", "2025-W37", "player9", "HillyStatue375", 6873, 18273.5, 228, 9),
-        ("demo_challenge", "2025-W37", "player10", "EquatorialGulf415", 6293, 24097.3, 816, 10),
+        ("demo_challenge", current_week, "player1", "Geosky", 15335, 15905.3, 1077, 1),
+        ("demo_challenge", current_week, "player2", "Chinker", 13464, 7731.9, 82479, 2),
+        ("demo_challenge", current_week, "player3", "Gat15", 11739, 8568.4, 258, 3),
+        ("demo_challenge", current_week, "player4", "TheFlane34", 9888, 10440.7, 115, 4),
+        ("demo_challenge", current_week, "player5", "m1r", 9604, 16345.3, 318, 5),
+        ("demo_challenge", current_week, "player6", "pxeliasxt", 9182, 38519.5, 479, 6),
+        ("demo_challenge", current_week, "player7", "EnchantingSummit973", 6957, 29998.9, 160, 7),
+        ("demo_challenge", current_week, "player8", "InfiniteDune090", 6909, 34660.5, 230, 8),
+        ("demo_challenge", current_week, "player9", "HillyStatue375", 6873, 18273.5, 228, 9),
+        ("demo_challenge", current_week, "player10", "EquatorialGulf415", 6293, 24097.3, 816, 10),
+    ]
+    
+    # Also add a previous week (closed)
+    prev_week = (datetime.now(TZ) - timedelta(weeks=1)).strftime("%Y-W%U")
+    prev_results = [
+        ("demo_challenge_prev", prev_week, "player1", "Geosky", 14200, 12000.0, 900, 1),
+        ("demo_challenge_prev", prev_week, "player2", "Chinker", 13800, 15000.0, 1200, 2),
+        ("demo_challenge_prev", prev_week, "player3", "Gat15", 12500, 18000.0, 800, 3),
+        ("demo_challenge_prev", prev_week, "player4", "TheFlane34", 11000, 20000.0, 1000, 4),
+        ("demo_challenge_prev", prev_week, "player5", "m1r", 9500, 25000.0, 600, 5),
     ]
     
     for challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank in demo_results:
