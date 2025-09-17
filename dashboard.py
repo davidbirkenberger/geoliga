@@ -237,11 +237,11 @@ def show_league_standings():
     # Highlight top 3
     def highlight_top3(row):
         if row['Rank'] == 1:
-            return ['background-color: #FFD700'] * len(row)  # Gold
+            return ['background-color: #2E8B57; color: white; font-weight: bold'] * len(row)  # Dark green with white text
         elif row['Rank'] == 2:
-            return ['background-color: #C0C0C0'] * len(row)  # Silver
+            return ['background-color: #708090; color: white; font-weight: bold'] * len(row)  # Slate gray with white text
         elif row['Rank'] == 3:
-            return ['background-color: #CD7F32'] * len(row)  # Bronze
+            return ['background-color: #CD7F32; color: white; font-weight: bold'] * len(row)  # Bronze with white text
         else:
             return [''] * len(row)
     
@@ -298,11 +298,11 @@ def show_weekly_results():
     # Highlight top 3
     def highlight_top3(row):
         if row['Rank'] == 1:
-            return ['background-color: #FFD700'] * len(row)
+            return ['background-color: #2E8B57; color: white; font-weight: bold'] * len(row)  # Dark green with white text
         elif row['Rank'] == 2:
-            return ['background-color: #C0C0C0'] * len(row)
+            return ['background-color: #708090; color: white; font-weight: bold'] * len(row)  # Slate gray with white text
         elif row['Rank'] == 3:
-            return ['background-color: #CD7F32'] * len(row)
+            return ['background-color: #CD7F32; color: white; font-weight: bold'] * len(row)  # Bronze with white text
         else:
             return [''] * len(row)
     
