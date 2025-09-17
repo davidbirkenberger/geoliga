@@ -22,12 +22,12 @@ except ImportError:
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
-# Try to use demo database for deployment, fallback to main database
+# Use main database locally, demo database for deployment
 import os
-if os.path.exists("geoliga_demo.db"):
-    DB_PATH = "geoliga_demo.db"
-elif os.path.exists("geoliga_backup.db"):
-    DB_PATH = "geoliga_backup.db"
+if os.path.exists("geoliga.db"):
+    DB_PATH = "geoliga.db"  # Use main database locally
+elif os.path.exists("geoliga_demo.db"):
+    DB_PATH = "geoliga_demo.db"  # Fallback to demo for deployment
 else:
     DB_PATH = "geoliga.db"
 
