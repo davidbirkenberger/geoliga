@@ -22,7 +22,7 @@ except ImportError:
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
-# Always use main database for local development
+# Always use main database (both locally and in deployment)
 DB_PATH = "geoliga.db"
 
 # Page config
