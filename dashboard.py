@@ -22,7 +22,14 @@ except ImportError:
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
-DB_PATH = "geoliga.db"
+# Try to use demo database for deployment, fallback to main database
+import os
+if os.path.exists("geoliga_demo.db"):
+    DB_PATH = "geoliga_demo.db"
+elif os.path.exists("geoliga_backup.db"):
+    DB_PATH = "geoliga_backup.db"
+else:
+    DB_PATH = "geoliga.db"
 
 # Page config
 st.set_page_config(
@@ -125,6 +132,11 @@ def format_time(seconds):
 def main():
     # Header
     st.title("🌍 GeoGuessr League Dashboard")
+    
+    # Show demo notice if using demo database
+    if DB_PATH == "geoliga_demo.db":
+        st.info("📊 **Demo Mode**: This dashboard is showing sample data. For real data, upload your own database.")
+    
     st.markdown("---")
     
     # Sidebar

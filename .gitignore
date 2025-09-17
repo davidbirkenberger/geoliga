@@ -5,6 +5,8 @@
 *.db
 *.sqlite
 *.sqlite3
+# But allow the backup for deployment
+!geoliga_backup.db
 
 # Python cache
 __pycache__/
