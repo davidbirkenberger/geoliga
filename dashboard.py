@@ -10,8 +10,15 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import plotly.express as px
-import plotly.graph_objects as go
+
+# Try to import plotly, fallback to simple version if not available
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("⚠️ Plotly not available. Using simple charts.")
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
@@ -286,80 +293,113 @@ def show_analytics():
         st.warning("No data available for analytics!")
         return
     
-    # Points distribution
-    st.subheader("Points Distribution")
-    fig = px.bar(
-        df_league.head(10), 
-        x='player_name', 
-        y='total_points',
-        title="Top 10 Players by Points",
-        color='total_points',
-        color_continuous_scale='viridis'
-    )
-    fig.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Participation chart
-    st.subheader("Participation Rate")
-    participation_data = df_players[df_players['total_challenges'] > 0].copy()
-    participation_data['participation_rate'] = (participation_data['total_challenges'] / participation_data['total_challenges'].max()) * 100
-    
-    fig = px.scatter(
-        participation_data,
-        x='total_challenges',
-        y='total_points',
-        size='avg_score',
-        hover_data=['player_name'],
-        title="Participation vs Performance",
-        labels={'total_challenges': 'Challenges Played', 'total_points': 'Total Points'}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Performance trends
-    st.subheader("Performance Trends")
-    
-    # Get weekly data for trends
-    weeks = get_available_weeks()
-    if len(weeks) > 1:
-        trend_data = []
-        for week in weeks:
-            week_df = get_weekly_standings(week)
-            if not week_df.empty:
-                trend_data.append({
-                    'week': week,
-                    'participants': len(week_df),
-                    'avg_score': week_df['score'].mean(),
-                    'best_score': week_df['score'].max()
-                })
+    if PLOTLY_AVAILABLE:
+        # Points distribution
+        st.subheader("Points Distribution")
+        fig = px.bar(
+            df_league.head(10), 
+            x='player_name', 
+            y='total_points',
+            title="Top 10 Players by Points",
+            color='total_points',
+            color_continuous_scale='viridis'
+        )
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
         
-        if trend_data:
-            trend_df = pd.DataFrame(trend_data)
+        # Participation chart
+        st.subheader("Participation Rate")
+        participation_data = df_players[df_players['total_challenges'] > 0].copy()
+        participation_data['participation_rate'] = (participation_data['total_challenges'] / participation_data['total_challenges'].max()) * 100
+        
+        fig = px.scatter(
+            participation_data,
+            x='total_challenges',
+            y='total_points',
+            size='avg_score',
+            hover_data=['player_name'],
+            title="Participation vs Performance",
+            labels={'total_challenges': 'Challenges Played', 'total_points': 'Total Points'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Performance trends
+        st.subheader("Performance Trends")
+        
+        # Get weekly data for trends
+        weeks = get_available_weeks()
+        if len(weeks) > 1:
+            trend_data = []
+            for week in weeks:
+                week_df = get_weekly_standings(week)
+                if not week_df.empty:
+                    trend_data.append({
+                        'week': week,
+                        'participants': len(week_df),
+                        'avg_score': week_df['score'].mean(),
+                        'best_score': week_df['score'].max()
+                    })
             
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=trend_df['week'],
-                y=trend_df['participants'],
-                mode='lines+markers',
-                name='Participants',
-                yaxis='y'
-            ))
-            fig.add_trace(go.Scatter(
-                x=trend_df['week'],
-                y=trend_df['avg_score'],
-                mode='lines+markers',
-                name='Average Score',
-                yaxis='y2'
-            ))
+            if trend_data:
+                trend_df = pd.DataFrame(trend_data)
+                
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=trend_df['week'],
+                    y=trend_df['participants'],
+                    mode='lines+markers',
+                    name='Participants',
+                    yaxis='y'
+                ))
+                fig.add_trace(go.Scatter(
+                    x=trend_df['week'],
+                    y=trend_df['avg_score'],
+                    mode='lines+markers',
+                    name='Average Score',
+                    yaxis='y2'
+                ))
+                
+                fig.update_layout(
+                    title="Weekly Trends",
+                    xaxis_title="Week",
+                    yaxis=dict(title="Participants", side="left"),
+                    yaxis2=dict(title="Average Score", side="right", overlaying="y"),
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+    else:
+        # Simple analytics without plotly
+        st.subheader("Points Distribution")
+        top_10 = df_league.head(10)
+        st.bar_chart(top_10.set_index('player_name')['total_points'])
+        
+        st.subheader("Participation vs Performance")
+        participation_data = df_players[df_players['total_challenges'] > 0].copy()
+        st.scatter_chart(
+            participation_data, 
+            x='total_challenges', 
+            y='total_points',
+            size='avg_score'
+        )
+        
+        st.subheader("Weekly Trends")
+        weeks = get_available_weeks()
+        if len(weeks) > 1:
+            trend_data = []
+            for week in weeks:
+                week_df = get_weekly_standings(week)
+                if not week_df.empty:
+                    trend_data.append({
+                        'week': week,
+                        'participants': len(week_df),
+                        'avg_score': week_df['score'].mean(),
+                        'best_score': week_df['score'].max()
+                    })
             
-            fig.update_layout(
-                title="Weekly Trends",
-                xaxis_title="Week",
-                yaxis=dict(title="Participants", side="left"),
-                yaxis2=dict(title="Average Score", side="right", overlaying="y"),
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            if trend_data:
+                trend_df = pd.DataFrame(trend_data)
+                st.line_chart(trend_df.set_index('week')[['participants', 'avg_score']])
 
 if __name__ == "__main__":
     main()
