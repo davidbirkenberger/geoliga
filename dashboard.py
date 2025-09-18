@@ -111,12 +111,12 @@ def get_weekly_standings(week=None):
         current_time = datetime.now(TZ)
         query_live = """
             SELECT 
-                pr.rank,
+                ROW_NUMBER() OVER (ORDER BY pr.score DESC) as rank,
                 pr.player_name,
                 pr.score,
                 CASE 
                     WHEN c.status = 'closed' THEN 0
-                    ELSE CASE pr.rank
+                    ELSE CASE ROW_NUMBER() OVER (ORDER BY pr.score DESC)
                         WHEN 1 THEN 25
                         WHEN 2 THEN 20
                         WHEN 3 THEN 15
@@ -135,7 +135,7 @@ def get_weekly_standings(week=None):
             FROM player_results pr
             JOIN challenges c ON pr.challenge_id = c.challenge_id
             WHERE pr.week = ? AND (c.status = 'closed' OR c.end_date > ?)
-            ORDER BY pr.rank
+            ORDER BY pr.score DESC
         """
         try:
             df = pd.read_sql_query(query_live, conn, params=(week, current_time.date()))
@@ -146,7 +146,7 @@ def get_weekly_standings(week=None):
     if df.empty and 'player_results' in tables:
         query_pending = """
             SELECT 
-                pr.rank,
+                ROW_NUMBER() OVER (ORDER BY pr.score DESC) as rank,
                 pr.player_name,
                 pr.score,
                 0 as points_awarded,
@@ -154,7 +154,7 @@ def get_weekly_standings(week=None):
                 pr.time_seconds
             FROM player_results pr
             WHERE pr.week = ?
-            ORDER BY pr.rank
+            ORDER BY pr.score DESC
         """
         try:
             df = pd.read_sql_query(query_pending, conn, params=(week,))

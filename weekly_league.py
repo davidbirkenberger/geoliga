@@ -96,6 +96,37 @@ def main():
         print(message)
         print("="*50)
     
+    elif command == "challenges":
+        challenges = league.get_active_challenges()
+        if not challenges:
+            print("📭 No active challenges found")
+        else:
+            print("🎯 Active Challenges:")
+            print("=" * 60)
+            for challenge in challenges:
+                end_date = datetime.strptime(challenge['end_date'], '%Y-%m-%d').replace(tzinfo=TZ)
+                print(f"ID: {challenge['challenge_id']}")
+                print(f"Week: {challenge['week']}")
+                print(f"Map: {challenge['map_name'] or 'Unknown'}")
+                print(f"Ends: {end_date.strftime('%Y-%m-%d %H:%M')} CET")
+                print("-" * 60)
+    
+    elif command == "update-end":
+        if len(sys.argv) < 4:
+            print("Usage: python weekly_league.py update-end <challenge_id> <new_end_date>")
+            print("end_date format: YYYY-MM-DD (e.g., 2024-01-15)")
+            sys.exit(1)
+        
+        challenge_id = sys.argv[2]
+        try:
+            new_end_date = datetime.strptime(sys.argv[3], '%Y-%m-%d').replace(tzinfo=TZ)
+        except ValueError:
+            print("❌ Invalid end_date format. Use YYYY-MM-DD (e.g., 2024-01-15)")
+            sys.exit(1)
+        
+        result = league.update_challenge_end_date(challenge_id, new_end_date)
+        print(f"{'✅' if result['success'] else '❌'} {result['message']}")
+    
     else:
         print(f"Unknown command: {command}")
         print_usage()
@@ -110,6 +141,8 @@ def print_usage():
     print("  close <challenge_id>                         - Close weekly challenge")
     print("  standings [week]                             - Show weekly standings")
     print("  league                                       - Show overall league standings")
+    print("  challenges                                   - Show active challenges")
+    print("  update-end <challenge_id> <end_date>         - Update challenge end date")
     print("\nExamples:")
     print("  python weekly_league.py create FbxiQzxzq9XuwwY2 'A Community World'")
     print("  python weekly_league.py create FbxiQzxzq9XuwwY2 'A Community World' 2024-01-15")
@@ -117,6 +150,8 @@ def print_usage():
     print("  python weekly_league.py close FbxiQzxzq9XuwwY2")
     print("  python weekly_league.py standings")
     print("  python weekly_league.py league")
+    print("  python weekly_league.py challenges")
+    print("  python weekly_league.py update-end FbxiQzxzq9XuwwY2 2024-01-20")
     print("\nNote: Challenges now count directly into overall standings while active!")
     print("      Set end_date to control when challenge stops accepting new entries.")
 
