@@ -38,7 +38,7 @@ def get_db_connection():
     return sqlite3.connect(DB_PATH)
 
 def get_league_standings():
-    """Get overall league standings."""
+    """Get overall league standings including active challenges."""
     conn = get_db_connection()
     
     # Check if tables exist
@@ -47,6 +47,11 @@ def get_league_standings():
     if not cursor.fetchone():
         conn.close()
         return pd.DataFrame()
+    
+    # First, update league standings to include active challenges
+    from league_manager import LeagueManager
+    league = LeagueManager()
+    league._update_league_standings()
     
     query = """
         SELECT 
@@ -65,7 +70,7 @@ def get_league_standings():
     return df
 
 def get_weekly_standings(week=None):
-    """Get weekly standings for a specific week."""
+    """Get weekly standings for a specific week including active challenges."""
     conn = get_db_connection()
     
     if week is None:
@@ -101,7 +106,43 @@ def get_weekly_standings(week=None):
         except:
             df = pd.DataFrame()
     
-    # If no closed standings, get pending results from player_results
+    # If no closed standings, get live results from player_results for active challenges
+    if df.empty and 'player_results' in tables and 'challenges' in tables:
+        current_time = datetime.now(TZ)
+        query_live = """
+            SELECT 
+                pr.rank,
+                pr.player_name,
+                pr.score,
+                CASE 
+                    WHEN c.status = 'closed' THEN 0
+                    ELSE CASE pr.rank
+                        WHEN 1 THEN 25
+                        WHEN 2 THEN 20
+                        WHEN 3 THEN 15
+                        WHEN 4 THEN 12
+                        WHEN 5 THEN 10
+                        WHEN 6 THEN 8
+                        WHEN 7 THEN 6
+                        WHEN 8 THEN 4
+                        WHEN 9 THEN 2
+                        WHEN 10 THEN 1
+                        ELSE 0
+                    END
+                END as points_awarded,
+                pr.distance_km,
+                pr.time_seconds
+            FROM player_results pr
+            JOIN challenges c ON pr.challenge_id = c.challenge_id
+            WHERE pr.week = ? AND (c.status = 'closed' OR c.end_date > ?)
+            ORDER BY pr.rank
+        """
+        try:
+            df = pd.read_sql_query(query_live, conn, params=(week, current_time.date()))
+        except:
+            df = pd.DataFrame()
+    
+    # Fallback to simple player_results query if above fails
     if df.empty and 'player_results' in tables:
         query_pending = """
             SELECT 
@@ -280,14 +321,6 @@ def show_weekly_results():
         st.warning(f"No data for week {selected_week}")
         return
     
-    # Check if this is pending results (no league points awarded yet)
-    is_pending = df['points_awarded'].sum() == 0
-    
-    # Display status
-    if is_pending:
-        st.info("🔄 **Live Results** - Challenge is still active. League points will be awarded when the week closes.")
-    else:
-        st.success("✅ **Final Results** - Week has been closed and league points awarded.")
     
     # Display results
     df_display = df.copy()
@@ -321,9 +354,6 @@ def show_weekly_results():
     with col3:
         st.metric("Best Time", format_time(df['time_seconds'].min()))
     
-    # Show additional info for pending results
-    if is_pending:
-        st.info("💡 **Tip**: Use `python weekly_league.py process CHALLENGE_ID` to update results during the week!")
 
 def show_player_stats():
     """Display detailed player statistics."""

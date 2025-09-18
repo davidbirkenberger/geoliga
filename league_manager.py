@@ -154,10 +154,18 @@ class LeagueManager:
         
         return target_monday, target_sunday
     
-    def create_challenge(self, challenge_id: str, map_name: str = None, rounds: int = 5, time_limit: int = 0) -> bool:
-        """Create a new challenge for the current week."""
+    def create_challenge(self, challenge_id: str, map_name: str = None, rounds: int = 5, time_limit: int = 0, end_date: datetime = None) -> bool:
+        """Create a new challenge with optional custom end date."""
         week = self.get_current_week()
-        start_date, end_date = self.get_week_dates(week)
+        start_date = datetime.now(TZ)
+        
+        # If no end_date provided, use current week's end date
+        if end_date is None:
+            _, end_date = self.get_week_dates(week)
+        else:
+            # Ensure end_date is timezone-aware
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=TZ)
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -190,10 +198,15 @@ class LeagueManager:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             
-            # Check if challenge exists
-            cursor.execute("SELECT challenge_id FROM challenges WHERE challenge_id = ?", (challenge_id,))
-            if not cursor.fetchone():
+            # Check if challenge exists and get its info
+            cursor.execute("SELECT challenge_id, week, end_date FROM challenges WHERE challenge_id = ?", (challenge_id,))
+            challenge_info = cursor.fetchone()
+            if not challenge_info:
                 return {"success": False, "message": "Challenge not found. Create it first."}
+            
+            challenge_week = challenge_info[1]
+            challenge_end_date = datetime.strptime(challenge_info[2], '%Y-%m-%d').replace(tzinfo=TZ)
+            current_time = datetime.now(TZ)
             
             new_players = 0
             updated_results = 0
@@ -223,11 +236,15 @@ class LeagueManager:
                     INSERT INTO player_results 
                     (challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (challenge_id, week, player_id, player_name, result['totalScore'], 
+                ''', (challenge_id, challenge_week, player_id, player_name, result['totalScore'], 
                       result['totalDistance'], result['totalTime'], i))
                 
                 new_players += 1
                 updated_results += 1
+            
+            # If challenge is still active (before end_date), update standings immediately
+            if current_time < challenge_end_date:
+                self._update_challenge_standings(challenge_id, challenge_week, conn, cursor)
             
             conn.commit()
             conn.close()
@@ -240,8 +257,37 @@ class LeagueManager:
         except Exception as e:
             return {"success": False, "message": f"Error processing results: {e}"}
     
+    def _update_challenge_standings(self, challenge_id: str, week: str, conn, cursor):
+        """Update standings for a specific challenge."""
+        # Get all results for this challenge, sorted by rank
+        cursor.execute('''
+            SELECT player_id, player_name, score, rank 
+            FROM player_results 
+            WHERE challenge_id = ? 
+            ORDER BY rank
+        ''', (challenge_id,))
+        
+        results = cursor.fetchall()
+        
+        # Calculate points and update weekly standings
+        for player_id, player_name, score, rank in results:
+            points = POINTS_SYSTEM.get(rank, 0)
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO weekly_standings 
+                (week, player_id, rank, score, points_awarded, participation)
+                VALUES (?, ?, ?, ?, ?, 1)
+            ''', (week, player_id, rank, score, points))
+        
+        # Update league standings
+        self._update_league_standings()
+    
     def close_weekly_challenge(self, challenge_id: str) -> Dict:
-        """Close a weekly challenge and calculate standings."""
+        """Close a weekly challenge and calculate standings.
+        
+        DEPRECATED: Challenges now auto-close based on end_date.
+        This method is kept for backward compatibility.
+        """
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
@@ -295,11 +341,11 @@ class LeagueManager:
             conn.close()
     
     def _update_league_standings(self):
-        """Update overall league standings."""
+        """Update overall league standings including active challenges."""
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get all players and their stats
+        # Get all players and their stats from weekly_standings (closed challenges)
         cursor.execute('''
             SELECT 
                 p.player_id,
@@ -312,12 +358,68 @@ class LeagueManager:
             GROUP BY p.player_id
         ''')
         
+        # Store closed challenge stats
+        closed_stats = {}
         for player_id, total_points, total_challenges, best_rank, worst_rank in cursor.fetchall():
+            closed_stats[player_id] = {
+                'total_points': total_points,
+                'total_challenges': total_challenges,
+                'best_rank': best_rank,
+                'worst_rank': worst_rank
+            }
+        
+        # Get active challenges and their current standings
+        current_time = datetime.now(TZ)
+        cursor.execute('''
+            SELECT DISTINCT c.challenge_id, c.week, c.end_date
+            FROM challenges c
+            WHERE c.status = 'active' AND c.end_date > ?
+        ''', (current_time.date(),))
+        
+        active_challenges = cursor.fetchall()
+        
+        # For each active challenge, get current standings
+        for challenge_id, week, end_date in active_challenges:
+            cursor.execute('''
+                SELECT player_id, rank, score
+                FROM player_results 
+                WHERE challenge_id = ? 
+                ORDER BY rank
+            ''', (challenge_id,))
+            
+            results = cursor.fetchall()
+            
+            # Calculate points for this challenge
+            for player_id, rank, score in results:
+                points = POINTS_SYSTEM.get(rank, 0)
+                
+                # Initialize player stats if not exists
+                if player_id not in closed_stats:
+                    closed_stats[player_id] = {
+                        'total_points': 0,
+                        'total_challenges': 0,
+                        'best_rank': None,
+                        'worst_rank': None
+                    }
+                
+                # Add points from this active challenge
+                closed_stats[player_id]['total_points'] += points
+                closed_stats[player_id]['total_challenges'] += 1
+                
+                # Update best/worst ranks
+                if closed_stats[player_id]['best_rank'] is None or rank < closed_stats[player_id]['best_rank']:
+                    closed_stats[player_id]['best_rank'] = rank
+                if closed_stats[player_id]['worst_rank'] is None or rank > closed_stats[player_id]['worst_rank']:
+                    closed_stats[player_id]['worst_rank'] = rank
+        
+        # Update league standings with combined stats
+        for player_id, stats in closed_stats.items():
             cursor.execute('''
                 INSERT OR REPLACE INTO league_standings 
                 (player_id, total_points, total_challenges, best_rank, worst_rank, last_updated)
                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (player_id, total_points, total_challenges, best_rank, worst_rank))
+            ''', (player_id, stats['total_points'], stats['total_challenges'], 
+                  stats['best_rank'], stats['worst_rank']))
         
         conn.commit()
         conn.close()

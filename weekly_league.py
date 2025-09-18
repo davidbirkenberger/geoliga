@@ -3,7 +3,7 @@
 Weekly GeoGuessr League - Simple Command Line Interface
 
 Usage:
-    python weekly_league.py create <challenge_id> [map_name]
+    python weekly_league.py create <challenge_id> [map_name] [end_date]
     python weekly_league.py process <challenge_id>
     python weekly_league.py close <challenge_id>
     python weekly_league.py standings [week]
@@ -11,7 +11,11 @@ Usage:
 """
 
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from league_manager import LeagueManager
+
+TZ = ZoneInfo("Europe/Berlin")
 
 def main():
     if len(sys.argv) < 2:
@@ -23,15 +27,30 @@ def main():
     
     if command == "create":
         if len(sys.argv) < 3:
-            print("Usage: python weekly_league.py create <challenge_id> [map_name]")
+            print("Usage: python weekly_league.py create <challenge_id> [map_name] [end_date]")
+            print("end_date format: YYYY-MM-DD (e.g., 2024-01-15)")
             sys.exit(1)
         
         challenge_id = sys.argv[2]
         map_name = sys.argv[3] if len(sys.argv) > 3 else None
+        end_date = None
         
-        result = league.create_challenge(challenge_id, map_name)
+        # Parse end_date if provided
+        if len(sys.argv) > 4:
+            try:
+                end_date = datetime.strptime(sys.argv[4], '%Y-%m-%d').replace(tzinfo=TZ)
+            except ValueError:
+                print("❌ Invalid end_date format. Use YYYY-MM-DD (e.g., 2024-01-15)")
+                sys.exit(1)
+        
+        result = league.create_challenge(challenge_id, map_name, end_date=end_date)
         if result:
-            print(f"✅ Challenge {challenge_id} created for week {league.get_current_week()}")
+            if end_date:
+                print(f"✅ Challenge {challenge_id} created for week {league.get_current_week()}")
+                print(f"📅 Challenge ends: {end_date.strftime('%Y-%m-%d %H:%M')} CET")
+            else:
+                print(f"✅ Challenge {challenge_id} created for week {league.get_current_week()}")
+                print("📅 Challenge ends: End of current week")
         else:
             print("❌ Failed to create challenge")
     
@@ -86,17 +105,20 @@ def print_usage():
     print("🏆 Weekly GeoGuessr League Manager")
     print("=" * 40)
     print("Commands:")
-    print("  create <challenge_id> [map_name]  - Create new weekly challenge")
-    print("  process <challenge_id>            - Process challenge results")
-    print("  close <challenge_id>              - Close weekly challenge")
-    print("  standings [week]                  - Show weekly standings")
-    print("  league                            - Show overall league standings")
+    print("  create <challenge_id> [map_name] [end_date]  - Create new challenge")
+    print("  process <challenge_id>                       - Process challenge results")
+    print("  close <challenge_id>                         - Close weekly challenge")
+    print("  standings [week]                             - Show weekly standings")
+    print("  league                                       - Show overall league standings")
     print("\nExamples:")
     print("  python weekly_league.py create FbxiQzxzq9XuwwY2 'A Community World'")
+    print("  python weekly_league.py create FbxiQzxzq9XuwwY2 'A Community World' 2024-01-15")
     print("  python weekly_league.py process FbxiQzxzq9XuwwY2")
     print("  python weekly_league.py close FbxiQzxzq9XuwwY2")
     print("  python weekly_league.py standings")
     print("  python weekly_league.py league")
+    print("\nNote: Challenges now count directly into overall standings while active!")
+    print("      Set end_date to control when challenge stops accepting new entries.")
 
 if __name__ == "__main__":
     main()
