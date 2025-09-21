@@ -213,79 +213,79 @@ class LeagueManager:
                 return {"success": False, "message": "No results found"}
             
             week = self.get_current_week()
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
             
-            # Check if challenge exists and get its info
-            cursor.execute("SELECT challenge_id, week, end_date FROM challenges WHERE challenge_id = ?", (challenge_id,))
-            challenge_info = cursor.fetchone()
-            if not challenge_info:
-                return {"success": False, "message": "Challenge not found. Create it first."}
-            
-            challenge_week = challenge_info[1]
-            challenge_end_date = datetime.strptime(challenge_info[2], '%Y-%m-%d').replace(tzinfo=TZ)
-            current_time = datetime.now(TZ)
-            
-            new_players = 0
-            updated_results = 0
-            
-            # First, collect all results and sort by score to calculate our own ranks
-            results_with_scores = []
-            for result in results:
-                player_id = result['userId']
-                player_name = result['username']
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
                 
-                # Check if player already has a result for this challenge
-                cursor.execute('''
-                    SELECT result_id FROM player_results 
-                    WHERE challenge_id = ? AND player_id = ?
-                ''', (challenge_id, player_id))
+                # Check if challenge exists and get its info
+                cursor.execute("SELECT challenge_id, week, end_date FROM challenges WHERE challenge_id = ?", (challenge_id,))
+                challenge_info = cursor.fetchone()
+                if not challenge_info:
+                    return {"success": False, "message": "Challenge not found. Create it first."}
                 
-                if cursor.fetchone():
-                    continue  # Skip if already exists (first attempt only)
+                challenge_week = challenge_info[1]
+                challenge_end_date = datetime.strptime(challenge_info[2], '%Y-%m-%d').replace(tzinfo=TZ)
+                current_time = datetime.now(TZ)
                 
-                results_with_scores.append({
-                    'player_id': player_id,
-                    'player_name': player_name,
-                    'score': result['totalScore'],
-                    'distance': result['totalDistance'],
-                    'time': result['totalTime'],
-                    'countryCode': result.get('countryCode'),
-                    'isVerified': result.get('isVerified', False)
-                })
-            
-            # Sort by score (descending) to calculate ranks
-            results_with_scores.sort(key=lambda x: x['score'], reverse=True)
-            
-            # Process each result with our calculated rank
-            for i, result_data in enumerate(results_with_scores, 1):
-                player_id = result_data['player_id']
-                player_name = result_data['player_name']
+                new_players = 0
+                updated_results = 0
                 
-                # Add/update player
-                cursor.execute('''
-                    INSERT OR REPLACE INTO players 
-                    (player_id, player_name, display_name, country_code, is_verified)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (player_id, player_name, player_name, result_data['countryCode'], result_data['isVerified']))
+                # First, collect all results and sort by score to calculate our own ranks
+                results_with_scores = []
+                for result in results:
+                    player_id = result['userId']
+                    player_name = result['username']
+                    
+                    # Check if player already has a result for this challenge
+                    cursor.execute('''
+                        SELECT result_id FROM player_results 
+                        WHERE challenge_id = ? AND player_id = ?
+                    ''', (challenge_id, player_id))
+                    
+                    if cursor.fetchone():
+                        continue  # Skip if already exists (first attempt only)
+                    
+                    results_with_scores.append({
+                        'player_id': player_id,
+                        'player_name': player_name,
+                        'score': result['totalScore'],
+                        'distance': result['totalDistance'],
+                        'time': result['totalTime'],
+                        'countryCode': result.get('countryCode'),
+                        'isVerified': result.get('isVerified', False)
+                    })
                 
-                # Add result with our calculated rank
-                cursor.execute('''
-                    INSERT INTO player_results 
-                    (challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (challenge_id, challenge_week, player_id, player_name, result_data['score'], 
-                      result_data['distance'], result_data['time'], i))
+                # Sort by score (descending) to calculate ranks
+                results_with_scores.sort(key=lambda x: x['score'], reverse=True)
                 
-                new_players += 1
-                updated_results += 1
-            
-            # If challenge is still active (before end_date), update standings immediately
-            if current_time < challenge_end_date:
-                self._update_challenge_standings(challenge_id, challenge_week, conn, cursor)
-            
-            conn.commit()
-            conn.close()
+                # Process each result with our calculated rank
+                for i, result_data in enumerate(results_with_scores, 1):
+                    player_id = result_data['player_id']
+                    player_name = result_data['player_name']
+                    
+                    # Add/update player
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO players 
+                        (player_id, player_name, display_name, country_code, is_verified)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (player_id, player_name, player_name, result_data['countryCode'], result_data['isVerified']))
+                    
+                    # Add result with our calculated rank
+                    cursor.execute('''
+                        INSERT INTO player_results 
+                        (challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (challenge_id, challenge_week, player_id, player_name, result_data['score'], 
+                          result_data['distance'], result_data['time'], i))
+                    
+                    new_players += 1
+                    updated_results += 1
+                
+                # If challenge is still active (before end_date), update standings immediately
+                if current_time < challenge_end_date:
+                    self._update_challenge_standings(challenge_id, challenge_week, conn, cursor)
+                
+                conn.commit()
             
             return {
                 "success": True, 
@@ -318,7 +318,7 @@ class LeagueManager:
             ''', (week, player_id, rank, score, points))
         
         # Update league standings
-        self._update_league_standings()
+        self._update_league_standings(conn, cursor)
     
     def close_weekly_challenge(self, challenge_id: str) -> Dict:
         """Close a weekly challenge and calculate standings.
@@ -378,10 +378,13 @@ class LeagueManager:
         finally:
             conn.close()
     
-    def _update_league_standings(self):
+    def _update_league_standings(self, conn=None, cursor=None):
         """Update overall league standings including active challenges."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        if conn is None or cursor is None:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                self._update_league_standings(conn, cursor)
+            return
         
         # Get all players and their stats from weekly_standings (closed challenges)
         cursor.execute('''
@@ -460,7 +463,6 @@ class LeagueManager:
                   stats['best_rank'], stats['worst_rank']))
         
         conn.commit()
-        conn.close()
     
     def get_active_challenges(self) -> List[Dict]:
         """Get all active challenges with their end dates."""
