@@ -11,6 +11,7 @@ Usage:
 import sys
 import subprocess
 import sqlite3
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from db_lock import db_lock
@@ -51,18 +52,30 @@ def get_all_challenges():
     finally:
         conn.close()
 
-def update_challenge(challenge_id):
-    """Update a single challenge."""
+def update_challenge(challenge_id, max_retries=3):
+    """Update a single challenge with retry logic."""
     print(f"🔄 Processing challenge {challenge_id}...")
     
-    with db_lock():
-        result = subprocess.run(f"python weekly_league.py process {challenge_id}", shell=True)
-        if result.returncode == 0:
-            print(f"✅ Challenge {challenge_id} updated successfully")
-            return True
-        else:
-            print(f"❌ Failed to update challenge {challenge_id}")
-            return False
+    for attempt in range(max_retries):
+        try:
+            with db_lock():
+                result = subprocess.run(f"python weekly_league.py process {challenge_id}", shell=True)
+                if result.returncode == 0:
+                    print(f"✅ Challenge {challenge_id} updated successfully")
+                    return True
+                else:
+                    print(f"❌ Failed to update challenge {challenge_id} (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        print(f"⏳ Retrying in 5 seconds...")
+                        time.sleep(5)
+        except Exception as e:
+            print(f"❌ Database lock error (attempt {attempt + 1}): {e}")
+            if attempt < max_retries - 1:
+                print(f"⏳ Retrying in 5 seconds...")
+                time.sleep(5)
+    
+    print(f"❌ Failed to update challenge {challenge_id} after {max_retries} attempts")
+    return False
 
 def main():
     if len(sys.argv) < 2:
