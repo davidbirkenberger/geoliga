@@ -12,11 +12,26 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional, Tuple
+from contextlib import contextmanager
 from geoguessr_api import create_client
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Database context manager to prevent locks
+@contextmanager
+def get_db_connection():
+    """Get a database connection with proper cleanup."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+        conn.execute("PRAGMA journal_mode = WAL")    # Better concurrency
+        yield conn
+    finally:
+        if conn:
+            conn.close()
 
 # Configuration
 TZ = ZoneInfo("Europe/Berlin")
@@ -47,89 +62,88 @@ class LeagueManager:
     
     def init_database(self):
         """Initialize the SQLite database with required tables."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Challenges table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS challenges (
-                challenge_id TEXT PRIMARY KEY,
-                week TEXT NOT NULL,
-                start_date DATE NOT NULL,
-                end_date DATE NOT NULL,
-                map_name TEXT,
-                rounds INTEGER,
-                time_limit INTEGER,
-                status TEXT DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Players table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS players (
-                player_id TEXT PRIMARY KEY,
-                player_name TEXT NOT NULL,
-                display_name TEXT,
-                country_code TEXT,
-                is_verified BOOLEAN DEFAULT 0,
-                joined_league DATE DEFAULT CURRENT_DATE,
-                total_challenges_played INTEGER DEFAULT 0,
-                current_streak INTEGER DEFAULT 0,
-                best_weekly_rank INTEGER,
-                total_league_points INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # Player results table (first attempt only)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS player_results (
-                result_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                challenge_id TEXT NOT NULL,
-                week TEXT NOT NULL,
-                player_id TEXT NOT NULL,
-                player_name TEXT NOT NULL,
-                score INTEGER NOT NULL,
-                distance_km REAL NOT NULL,
-                time_seconds INTEGER NOT NULL,
-                rank INTEGER NOT NULL,
-                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (challenge_id) REFERENCES challenges (challenge_id),
-                FOREIGN KEY (player_id) REFERENCES players (player_id),
-                UNIQUE (challenge_id, player_id)
-            )
-        ''')
-        
-        # Weekly standings table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS weekly_standings (
-                week TEXT NOT NULL,
-                player_id TEXT NOT NULL,
-                rank INTEGER NOT NULL,
-                score INTEGER NOT NULL,
-                points_awarded INTEGER NOT NULL,
-                participation BOOLEAN DEFAULT 1,
-                PRIMARY KEY (week, player_id),
-                FOREIGN KEY (player_id) REFERENCES players (player_id)
-            )
-        ''')
-        
-        # League standings table (overall)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS league_standings (
-                player_id TEXT PRIMARY KEY,
-                total_points INTEGER DEFAULT 0,
-                total_challenges INTEGER DEFAULT 0,
-                current_streak INTEGER DEFAULT 0,
-                best_rank INTEGER,
-                worst_rank INTEGER,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (player_id) REFERENCES players (player_id)
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Challenges table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS challenges (
+                    challenge_id TEXT PRIMARY KEY,
+                    week TEXT NOT NULL,
+                    start_date DATE NOT NULL,
+                    end_date DATE NOT NULL,
+                    map_name TEXT,
+                    rounds INTEGER,
+                    time_limit INTEGER,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Players table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS players (
+                    player_id TEXT PRIMARY KEY,
+                    player_name TEXT NOT NULL,
+                    display_name TEXT,
+                    country_code TEXT,
+                    is_verified BOOLEAN DEFAULT 0,
+                    joined_league DATE DEFAULT CURRENT_DATE,
+                    total_challenges_played INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    best_weekly_rank INTEGER,
+                    total_league_points INTEGER DEFAULT 0
+                )
+            ''')
+            
+            # Player results table (first attempt only)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS player_results (
+                    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    challenge_id TEXT NOT NULL,
+                    week TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    player_name TEXT NOT NULL,
+                    score INTEGER NOT NULL,
+                    distance_km REAL NOT NULL,
+                    time_seconds INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (challenge_id) REFERENCES challenges (challenge_id),
+                    FOREIGN KEY (player_id) REFERENCES players (player_id),
+                    UNIQUE (challenge_id, player_id)
+                )
+            ''')
+            
+            # Weekly standings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS weekly_standings (
+                    week TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    rank INTEGER NOT NULL,
+                    score INTEGER NOT NULL,
+                    points_awarded INTEGER NOT NULL,
+                    participation BOOLEAN DEFAULT 1,
+                    PRIMARY KEY (week, player_id),
+                    FOREIGN KEY (player_id) REFERENCES players (player_id)
+                )
+            ''')
+            
+            # League standings table (overall)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS league_standings (
+                    player_id TEXT PRIMARY KEY,
+                    total_points INTEGER DEFAULT 0,
+                    total_challenges INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    best_rank INTEGER,
+                    worst_rank INTEGER,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (player_id) REFERENCES players (player_id)
+                )
+            ''')
+            
+            conn.commit()
     
     def get_current_week(self) -> str:
         """Get current week in YYYY-W## format."""

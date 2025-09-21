@@ -16,30 +16,39 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Berlin")
 
+def get_db_connection():
+    """Get a database connection with proper cleanup."""
+    conn = sqlite3.connect("geoliga.db", timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+    conn.execute("PRAGMA journal_mode = WAL")    # Better concurrency
+    return conn
+
 def get_active_challenges():
     """Get all active challenges from database."""
-    conn = sqlite3.connect("geoliga.db")
-    cursor = conn.cursor()
-    
-    current_time = datetime.now(TZ)
-    cursor.execute('''
-        SELECT challenge_id FROM challenges 
-        WHERE status = 'active' AND end_date > ?
-    ''', (current_time.date(),))
-    
-    challenges = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return challenges
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        current_time = datetime.now(TZ)
+        cursor.execute('''
+            SELECT challenge_id FROM challenges 
+            WHERE status = 'active' AND end_date > ?
+        ''', (current_time.date(),))
+        
+        challenges = [row[0] for row in cursor.fetchall()]
+        return challenges
+    finally:
+        conn.close()
 
 def get_all_challenges():
     """Get all challenges from database."""
-    conn = sqlite3.connect("geoliga.db")
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT challenge_id FROM challenges')
-    challenges = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return challenges
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT challenge_id FROM challenges')
+        challenges = [row[0] for row in cursor.fetchall()]
+        return challenges
+    finally:
+        conn.close()
 
 def update_challenge(challenge_id):
     """Update a single challenge."""
