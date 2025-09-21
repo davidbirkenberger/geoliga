@@ -37,6 +37,88 @@ def get_db_connection():
     """Get database connection."""
     return sqlite3.connect(DB_PATH)
 
+def _update_league_standings_simple(conn):
+    """Update overall league standings including active challenges (without API dependencies)."""
+    cursor = conn.cursor()
+    
+    # Get all players and their stats from weekly_standings (closed challenges)
+    cursor.execute('''
+        SELECT 
+            p.player_id,
+            COALESCE(SUM(ws.points_awarded), 0) as total_points,
+            COUNT(ws.week) as total_challenges,
+            MAX(ws.rank) as best_rank,
+            MIN(ws.rank) as worst_rank
+        FROM players p
+        LEFT JOIN weekly_standings ws ON p.player_id = ws.player_id
+        GROUP BY p.player_id
+    ''')
+    
+    # Store closed challenge stats
+    closed_stats = {}
+    for player_id, total_points, total_challenges, best_rank, worst_rank in cursor.fetchall():
+        closed_stats[player_id] = {
+            'total_points': total_points,
+            'total_challenges': total_challenges,
+            'best_rank': best_rank,
+            'worst_rank': worst_rank
+        }
+    
+    # Get active challenges and their current standings
+    current_time = datetime.now(TZ)
+    cursor.execute('''
+        SELECT DISTINCT c.challenge_id, c.week, c.end_date
+        FROM challenges c
+        WHERE c.status = 'active' AND c.end_date > ?
+    ''', (current_time.date(),))
+    
+    active_challenges = cursor.fetchall()
+    
+    # For each active challenge, get current standings
+    for challenge_id, week, end_date in active_challenges:
+        cursor.execute('''
+            SELECT player_id, score
+            FROM player_results 
+            WHERE challenge_id = ? 
+            ORDER BY score DESC
+        ''', (challenge_id,))
+        
+        results = cursor.fetchall()
+        
+        # Calculate points for this challenge using our own ranking
+        for rank, (player_id, score) in enumerate(results, 1):
+            points = {1: 25, 2: 20, 3: 15, 4: 12, 5: 10, 6: 8, 7: 6, 8: 4, 9: 2, 10: 1}.get(rank, 0)
+            
+            # Initialize player stats if not exists
+            if player_id not in closed_stats:
+                closed_stats[player_id] = {
+                    'total_points': 0,
+                    'total_challenges': 0,
+                    'best_rank': None,
+                    'worst_rank': None
+                }
+            
+            # Add points from this active challenge
+            closed_stats[player_id]['total_points'] += points
+            closed_stats[player_id]['total_challenges'] += 1
+            
+            # Update best/worst ranks
+            if closed_stats[player_id]['best_rank'] is None or rank < closed_stats[player_id]['best_rank']:
+                closed_stats[player_id]['best_rank'] = rank
+            if closed_stats[player_id]['worst_rank'] is None or rank > closed_stats[player_id]['worst_rank']:
+                closed_stats[player_id]['worst_rank'] = rank
+    
+    # Update league standings with combined stats
+    for player_id, stats in closed_stats.items():
+        cursor.execute('''
+            INSERT OR REPLACE INTO league_standings 
+            (player_id, total_points, total_challenges, best_rank, worst_rank, last_updated)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (player_id, stats['total_points'], stats['total_challenges'], 
+              stats['best_rank'], stats['worst_rank']))
+    
+    conn.commit()
+
 def get_league_standings():
     """Get overall league standings including active challenges."""
     conn = get_db_connection()
@@ -48,10 +130,8 @@ def get_league_standings():
         conn.close()
         return pd.DataFrame()
     
-    # First, update league standings to include active challenges
-    from league_manager import LeagueManager
-    league = LeagueManager()
-    league._update_league_standings()
+    # Update league standings to include active challenges (without API dependencies)
+    _update_league_standings_simple(conn)
     
     query = """
         SELECT 
@@ -115,7 +195,7 @@ def get_weekly_standings(week=None):
                 pr.player_name,
                 pr.score,
                 CASE 
-                    WHEN c.status = 'closed' THEN 0
+                    WHEN c.end_date <= ? THEN 0
                     ELSE CASE ROW_NUMBER() OVER (ORDER BY pr.score DESC)
                         WHEN 1 THEN 25
                         WHEN 2 THEN 20
@@ -134,11 +214,11 @@ def get_weekly_standings(week=None):
                 pr.time_seconds
             FROM player_results pr
             JOIN challenges c ON pr.challenge_id = c.challenge_id
-            WHERE pr.week = ? AND (c.status = 'closed' OR c.end_date > ?)
+            WHERE pr.week = ? AND c.end_date > ?
             ORDER BY pr.score DESC
         """
         try:
-            df = pd.read_sql_query(query_live, conn, params=(week, current_time.date()))
+            df = pd.read_sql_query(query_live, conn, params=(current_time.date(), week, current_time.date()))
         except:
             df = pd.DataFrame()
     
@@ -199,6 +279,10 @@ def get_available_weeks():
 def get_player_stats():
     """Get detailed player statistics."""
     conn = get_db_connection()
+    
+    # Update league standings first
+    _update_league_standings_simple(conn)
+    
     query = """
         SELECT 
             p.player_name,
