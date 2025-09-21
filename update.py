@@ -13,6 +13,7 @@ import subprocess
 import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from db_lock import db_lock
 
 TZ = ZoneInfo("Europe/Berlin")
 
@@ -53,13 +54,15 @@ def get_all_challenges():
 def update_challenge(challenge_id):
     """Update a single challenge."""
     print(f"🔄 Processing challenge {challenge_id}...")
-    result = subprocess.run(f"python weekly_league.py process {challenge_id}", shell=True)
-    if result.returncode == 0:
-        print(f"✅ Challenge {challenge_id} updated successfully")
-        return True
-    else:
-        print(f"❌ Failed to update challenge {challenge_id}")
-        return False
+    
+    with db_lock():
+        result = subprocess.run(f"python weekly_league.py process {challenge_id}", shell=True)
+        if result.returncode == 0:
+            print(f"✅ Challenge {challenge_id} updated successfully")
+            return True
+        else:
+            print(f"❌ Failed to update challenge {challenge_id}")
+            return False
 
 def main():
     if len(sys.argv) < 2:
