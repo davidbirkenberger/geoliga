@@ -331,7 +331,7 @@ def main():
     # Navigation
     page = st.sidebar.selectbox(
         "Choose a page:",
-        ["🏆 League Standings", "📅 Weekly Results", "👥 Player Stats", "📈 Analytics"]
+        ["🏆 League Standings", "📅 Weekly Results"]
     )
     
     if page == "🏆 League Standings":
