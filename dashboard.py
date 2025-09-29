@@ -47,6 +47,7 @@ def _update_league_standings_simple(conn):
             p.player_id,
             COALESCE(SUM(ws.points_awarded), 0) as total_points,
             COUNT(ws.week) as total_challenges,
+            COALESCE(SUM(ws.score), 0) as total_score,
             MAX(ws.rank) as best_rank,
             MIN(ws.rank) as worst_rank
         FROM players p
@@ -56,10 +57,11 @@ def _update_league_standings_simple(conn):
     
     # Store closed challenge stats
     closed_stats = {}
-    for player_id, total_points, total_challenges, best_rank, worst_rank in cursor.fetchall():
+    for player_id, total_points, total_challenges, total_score, best_rank, worst_rank in cursor.fetchall():
         closed_stats[player_id] = {
             'total_points': total_points,
             'total_challenges': total_challenges,
+            'total_score': total_score,
             'best_rank': best_rank,
             'worst_rank': worst_rank
         }
@@ -94,13 +96,15 @@ def _update_league_standings_simple(conn):
                 closed_stats[player_id] = {
                     'total_points': 0,
                     'total_challenges': 0,
+                    'total_score': 0,
                     'best_rank': None,
                     'worst_rank': None
                 }
             
-            # Add points from this active challenge
+            # Add points and score from this active challenge
             closed_stats[player_id]['total_points'] += points
             closed_stats[player_id]['total_challenges'] += 1
+            closed_stats[player_id]['total_score'] += score
             
             # Update best/worst ranks
             if closed_stats[player_id]['best_rank'] is None or rank < closed_stats[player_id]['best_rank']:
@@ -110,12 +114,16 @@ def _update_league_standings_simple(conn):
     
     # Update league standings with combined stats
     for player_id, stats in closed_stats.items():
+        # Calculate average points per round (assuming 5 rounds per challenge)
+        total_rounds = stats['total_challenges'] * 5
+        avg_points_per_round = stats['total_score'] / total_rounds if total_rounds > 0 else 0.0
+        
         cursor.execute('''
             INSERT OR REPLACE INTO league_standings 
-            (player_id, total_points, total_challenges, best_rank, worst_rank, last_updated)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            (player_id, total_points, total_challenges, best_rank, worst_rank, avg_points_per_round, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (player_id, stats['total_points'], stats['total_challenges'], 
-              stats['best_rank'], stats['worst_rank']))
+              stats['best_rank'], stats['worst_rank'], avg_points_per_round))
     
     conn.commit()
 
@@ -140,6 +148,7 @@ def get_league_standings():
             ls.total_challenges,
             ls.best_rank,
             ls.worst_rank,
+            ls.avg_points_per_round,
             ls.last_updated
         FROM league_standings ls
         JOIN players p ON ls.player_id = p.player_id
@@ -174,7 +183,12 @@ def get_weekly_standings(week=None):
                 ws.score,
                 ws.points_awarded,
                 pr.distance_km,
-                pr.time_seconds
+                pr.time_seconds,
+                pr.round1_score,
+                pr.round2_score,
+                pr.round3_score,
+                pr.round4_score,
+                pr.round5_score
             FROM weekly_standings ws
             JOIN players p ON ws.player_id = p.player_id
             JOIN player_results pr ON ws.player_id = pr.player_id AND ws.week = pr.week
@@ -211,7 +225,12 @@ def get_weekly_standings(week=None):
                     END
                 END as points_awarded,
                 pr.distance_km,
-                pr.time_seconds
+                pr.time_seconds,
+                pr.round1_score,
+                pr.round2_score,
+                pr.round3_score,
+                pr.round4_score,
+                pr.round5_score
             FROM player_results pr
             JOIN challenges c ON pr.challenge_id = c.challenge_id
             WHERE pr.week = ? AND c.end_date > ?
@@ -356,8 +375,8 @@ def show_league_standings():
     # Create a nice table
     df_display = df.copy()
     df_display['rank'] = range(1, len(df_display) + 1)
-    df_display = df_display[['rank', 'player_name', 'total_points', 'total_challenges', 'best_rank', 'worst_rank']]
-    df_display.columns = ['Rank', 'Player', 'Total Points', 'Challenges', 'Best Rank', 'Worst Rank']
+    df_display = df_display[['rank', 'player_name', 'total_points', 'total_challenges', 'avg_points_per_round', 'best_rank', 'worst_rank']]
+    df_display.columns = ['Rank', 'Player', 'Total Points', 'Challenges', 'Avg Pts/Round', 'Best Rank', 'Worst Rank']
     
     # Highlight top 3
     def highlight_top3(row):
@@ -409,8 +428,19 @@ def show_weekly_results():
     # Display results
     df_display = df.copy()
     df_display['time_formatted'] = df_display['time_seconds'].apply(format_time)
-    df_display = df_display[['rank', 'player_name', 'score', 'points_awarded', 'distance_km', 'time_formatted']]
-    df_display.columns = ['Rank', 'Player', 'Score', 'League Points', 'Distance (km)', 'Time']
+    
+    # Create round scores display
+    round_columns = ['round1_score', 'round2_score', 'round3_score', 'round4_score', 'round5_score']
+    if all(col in df_display.columns for col in round_columns):
+        df_display['rounds_display'] = df_display[round_columns].apply(
+            lambda row: f"{row['round1_score']} | {row['round2_score']} | {row['round3_score']} | {row['round4_score']} | {row['round5_score']}", 
+            axis=1
+        )
+        df_display = df_display[['rank', 'player_name', 'score', 'rounds_display', 'points_awarded', 'distance_km', 'time_formatted']]
+        df_display.columns = ['Rank', 'Player', 'Total Score', 'Round Scores', 'League Points', 'Distance (km)', 'Time']
+    else:
+        df_display = df_display[['rank', 'player_name', 'score', 'points_awarded', 'distance_km', 'time_formatted']]
+        df_display.columns = ['Rank', 'Player', 'Score', 'League Points', 'Distance (km)', 'Time']
     
     # Highlight top 3
     def highlight_top3(row):

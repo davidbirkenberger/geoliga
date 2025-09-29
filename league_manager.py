@@ -245,6 +245,16 @@ class LeagueManager:
                     if cursor.fetchone():
                         continue  # Skip if already exists (first attempt only)
                     
+                    # Extract individual round scores
+                    rounds = result.get('rounds', [])
+                    round_scores = [0, 0, 0, 0, 0]  # Default to 5 rounds with 0 scores
+                    
+                    for i, round_data in enumerate(rounds[:5]):  # Only take first 5 rounds
+                        if isinstance(round_data, dict) and 'score' in round_data:
+                            round_scores[i] = round_data['score']
+                        elif isinstance(round_data, (int, float)):
+                            round_scores[i] = round_data
+                    
                     results_with_scores.append({
                         'player_id': player_id,
                         'player_name': player_name,
@@ -252,7 +262,8 @@ class LeagueManager:
                         'distance': result['totalDistance'],
                         'time': result['totalTime'],
                         'countryCode': result.get('countryCode'),
-                        'isVerified': result.get('isVerified', False)
+                        'isVerified': result.get('isVerified', False),
+                        'round_scores': round_scores
                     })
                 
                 # Sort by score (descending) to calculate ranks
@@ -270,13 +281,17 @@ class LeagueManager:
                         VALUES (?, ?, ?, ?, ?)
                     ''', (player_id, player_name, player_name, result_data['countryCode'], result_data['isVerified']))
                     
-                    # Add result with our calculated rank
+                    # Add result with our calculated rank and round scores
                     cursor.execute('''
                         INSERT INTO player_results 
-                        (challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (challenge_id, week, player_id, player_name, score, distance_km, time_seconds, rank,
+                         round1_score, round2_score, round3_score, round4_score, round5_score)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (challenge_id, challenge_week, player_id, player_name, result_data['score'], 
-                          result_data['distance'], result_data['time'], i))
+                          result_data['distance'], result_data['time'], i,
+                          result_data['round_scores'][0], result_data['round_scores'][1], 
+                          result_data['round_scores'][2], result_data['round_scores'][3], 
+                          result_data['round_scores'][4]))
                     
                     new_players += 1
                     updated_results += 1
@@ -393,6 +408,7 @@ class LeagueManager:
                 p.player_id,
                 COALESCE(SUM(ws.points_awarded), 0) as total_points,
                 COUNT(ws.week) as total_challenges,
+                COALESCE(SUM(ws.score), 0) as total_score,
                 MAX(ws.rank) as best_rank,
                 MIN(ws.rank) as worst_rank
             FROM players p
@@ -404,10 +420,11 @@ class LeagueManager:
         
         # Store closed challenge stats
         closed_stats = {}
-        for player_id, total_points, total_challenges, best_rank, worst_rank in cursor.fetchall():
+        for player_id, total_points, total_challenges, total_score, best_rank, worst_rank in cursor.fetchall():
             closed_stats[player_id] = {
                 'total_points': total_points,
                 'total_challenges': total_challenges,
+                'total_score': total_score,
                 'best_rank': best_rank,
                 'worst_rank': worst_rank
             }
@@ -441,13 +458,15 @@ class LeagueManager:
                     closed_stats[player_id] = {
                         'total_points': 0,
                         'total_challenges': 0,
+                        'total_score': 0,
                         'best_rank': None,
                         'worst_rank': None
                     }
                 
-                # Add points from this active challenge
+                # Add points and score from this active challenge
                 closed_stats[player_id]['total_points'] += points
                 closed_stats[player_id]['total_challenges'] += 1
+                closed_stats[player_id]['total_score'] += score
                 
                 # Update best/worst ranks
                 if closed_stats[player_id]['best_rank'] is None or rank < closed_stats[player_id]['best_rank']:
@@ -457,12 +476,16 @@ class LeagueManager:
         
         # Update league standings with combined stats
         for player_id, stats in closed_stats.items():
+            # Calculate average points per round (assuming 5 rounds per challenge)
+            total_rounds = stats['total_challenges'] * 5
+            avg_points_per_round = stats['total_score'] / total_rounds if total_rounds > 0 else 0.0
+            
             cursor.execute('''
                 INSERT OR REPLACE INTO league_standings 
-                (player_id, total_points, total_challenges, best_rank, worst_rank, last_updated)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (player_id, total_points, total_challenges, best_rank, worst_rank, avg_points_per_round, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (player_id, stats['total_points'], stats['total_challenges'], 
-                  stats['best_rank'], stats['worst_rank']))
+                  stats['best_rank'], stats['worst_rank'], avg_points_per_round))
         
         conn.commit()
     
@@ -602,21 +625,23 @@ class LeagueManager:
                 p.player_name,
                 ls.total_challenges,
                 ls.best_rank,
-                ls.worst_rank
+                ls.worst_rank,
+                ls.avg_points_per_round
             FROM league_standings ls
             JOIN players p ON ls.player_id = p.player_id
             ORDER BY ls.total_points DESC, ls.best_rank ASC
         ''')
         
         results = []
-        for i, (total_points, player_name, total_challenges, best_rank, worst_rank) in enumerate(cursor.fetchall(), 1):
+        for i, (total_points, player_name, total_challenges, best_rank, worst_rank, avg_points_per_round) in enumerate(cursor.fetchall(), 1):
             results.append({
                 'rank': i,
                 'player_name': player_name,
                 'total_points': total_points,
                 'total_challenges': total_challenges,
                 'best_rank': best_rank,
-                'worst_rank': worst_rank
+                'worst_rank': worst_rank,
+                'avg_points_per_round': avg_points_per_round
             })
         
         conn.close()
