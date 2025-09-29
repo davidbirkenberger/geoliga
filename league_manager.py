@@ -386,7 +386,8 @@ class LeagueManager:
                 self._update_league_standings(conn, cursor)
             return
         
-        # Get all players and their stats from weekly_standings (closed challenges)
+        # Get all players and their stats from weekly_standings (closed challenges only)
+        current_time = datetime.now(TZ)
         cursor.execute('''
             SELECT 
                 p.player_id,
@@ -396,8 +397,10 @@ class LeagueManager:
                 MIN(ws.rank) as worst_rank
             FROM players p
             LEFT JOIN weekly_standings ws ON p.player_id = ws.player_id
+            LEFT JOIN challenges c ON ws.week = c.week
+            WHERE c.end_date < ? OR c.end_date IS NULL
             GROUP BY p.player_id
-        ''')
+        ''', (current_time.date(),))
         
         # Store closed challenge stats
         closed_stats = {}
@@ -410,7 +413,6 @@ class LeagueManager:
             }
         
         # Get active challenges and their current standings
-        current_time = datetime.now(TZ)
         cursor.execute('''
             SELECT DISTINCT c.challenge_id, c.week, c.end_date
             FROM challenges c
